@@ -1,0 +1,495 @@
+<project name="ProjectTemplate" basedir=".">
+	<description>
+	        ${ant.project.name} Automation Suite
+	    </description>
+
+	<taskdef resource="net/sf/antcontrib/antlib.xml">
+		<classpath>
+			<pathelement location="../common/lib/ant-contrib-1.0b3.jar" />
+		</classpath>
+	</taskdef>
+
+	<taskdef name="xmltask" classname="com.oopsconsultancy.xmltask.ant.XmlTask">
+		<classpath>
+			<pathelement location="../common/lib/xmltask.jar" />
+		</classpath>
+	</taskdef>
+
+	<dirname property="project.template.basedir" file="${ant.file.ProjectTemplate}" />
+	<basename file="${basedir}" property="project.dir.name" />
+	<property name="src" location="src/java" />
+	<property name="reports" location="reports" />
+	<property name="selenium.server.logfile" value="debug.log" />
+	<property name="selenium.server.logfile.zip" value="selenium_logs.zip" />
+	<property name="build" location="${project.template.basedir}/../bin" />
+	<property name="dist" location="${project.template.basedir}/../dist" />
+	<property name="lib" location="${project.template.basedir}/lib" />
+	<property name="jar_name" value="${ant.project.name}.jar" />
+	<property name="video.recorder" value="${lib}/screen-recorder.jar" />
+	<property name="testsuiteSrc" value="testsuite.txt" />
+	<property name="ie.driver.path" location="${project.template.basedir}/resources/IEDriverServer.exe" />
+	<property name="chrome.driver.path" location="${project.template.basedir}/resources/chromedriver.exe" />
+	<!--property name="chrome.driver.port" value="4447"/-->
+	<!--load project-specific properties first-->
+	<property file="${basedir}/${project.dir.name}.properties" />
+	<!--then load global properties. since properties are immutable, project properties should override globals.-->
+	<property file="${project.template.basedir}/../common/test.properties" />
+
+	<target name="verify_properties" description="fail if any property isn't set">
+		<checkProp prop.check="project.template.basedir" />
+		<checkProp prop.check="src" />
+		<checkProp prop.check="reports" />
+		<checkProp prop.check="selenium.server.logfile" />
+		<checkProp prop.check="selenium.server.logfile.zip" />
+		<checkProp prop.check="build" />
+		<checkProp prop.check="dist" />
+		<checkProp prop.check="lib" />
+		<checkProp prop.check="jar_name" />
+		<checkProp prop.check="video.recorder" />
+		<checkProp prop.check="AppBrowser" />
+		<checkProp prop.check="WebDriverServerPort" />
+	</target>
+
+	<macrodef name="checkProp">
+		<attribute name="prop.check" />
+		<sequential>
+			<condition property="missingProp">
+				<equals arg1="$${@{prop.check}}" arg2="${@{prop.check}}" />
+			</condition>
+			<fail message="@{prop.check} property isn't set." if="missingProp" />
+		</sequential>
+	</macrodef>
+
+
+	<!-- top level targets -->
+	<target name="compile" description="compile the source code ">
+		<javac destdir="${build}" debug="on" includeAntRuntime="false" encoding="UTF-8">
+			<src path="${src}" />
+			<classpath>
+				<fileset dir="${lib}">
+					<include name="**/*.jar" />
+				</fileset>
+			</classpath>
+		</javac>
+	</target>
+
+	<target name="dist" description="generate the distributable files ">
+		<!-- Put everything in ${build} into the ${project_name}.jar file -->
+		<jar jarfile="${dist}/${jar_name}" basedir="${build}" />
+	</target>
+
+	<target name="run-test-suite">
+		<if>
+			<and>
+				<isset property="level" />
+				<not>
+					<istrue value="${ignorelevel}" />
+				</not>
+			</and>
+			<then>
+				<property name="echomsg" value="level=${level}" />
+				<property name="locallevel" value="${level}" />
+			</then>
+			<else>
+				<property name="echomsg" value="all levels" />
+				<property name="locallevel" value="-1" />
+			</else>
+		</if>
+		<property name="localExcludeGroups" value="${excludeGroups}" />
+		<property name="localIncludeGroups" value="${includeGroups}" />
+		<if>
+			<and>
+				<isset property="excludeGroups" />
+			</and>
+			<then>
+				<echo message="Excluded Group : ${localExcludeGroups}"/>
+			</then>
+		</if>
+
+		<if>
+			<and>
+				<isset property="includeGroups" />
+			</and>
+			<then>
+				<echo message="Included Group : ${localIncludeGroups}"/>
+			</then>
+		</if>
+		<if>
+			<and>
+				<isset property="bugdbUsername" />
+				<isset property="bugdbPassword" />
+			</and>
+			<then>
+				<echo message="BugDB credentials provided..." />
+				<property name="localBugdbUsername" value="${bugdbUsername}" />
+				<property name="localBugdbPassword" value="${bugdbPassword}" />
+			</then>
+			<else>
+				<property name="localBugdbUsername" value="" />
+				<property name="localBugdbPassword" value="" />
+			</else>
+		</if>
+		<echo message="Running tests of ${echomsg} from ${name} suite." />
+		<var name="suitefailed" unset="true" />
+		<loadfile property="testsuite" srcFile="${name}" />
+		<for list="${testsuite}" param="singletest" delimiter="${line.separator}">
+			<sequential>
+				<var name="singletest.name" unset="true" />
+				<var name="singletest.dep" unset="true" />
+				<script language="javascript">
+					<![CDATA[
+            var array = "@{singletest}".split(' ');
+            project.setProperty("singletest.name", array[0]);
+            project.setProperty("singletest.dep", array[1]);
+            ]]>
+				</script>
+
+				<if>
+					<not>
+						<or>
+							<equals arg1="${singletest.dep}" arg2="true" />
+							<equals arg1="${singletest.dep}" arg2="false" />
+							<equals arg1="${singletest.dep}" arg2="undefined" />
+						</or>
+					</not>
+					<then>
+						<fail message="Incorrect dependency status '${singletest.dep}' for pattern ${singletest.name}" />
+					</then>
+				</if>
+
+				<if>
+					<not>
+						<isset property="breakloop" />
+					</not>
+					<then>
+						<!--custom part begins-->
+						<antcall target="check-webdriver-server" inheritAll="true" />
+						<!--custom part ends-->
+						<junit printsummary="yes" haltonfailure="no" failureproperty="suitefailed" errorproperty="suitefailed" showoutput="yes" dir="${basedir}">
+							<jvmarg value="-Dlevel=${locallevel}" />
+							<jvmarg value="-DincludeGroups=${localIncludeGroups}"/>
+							<jvmarg value="-DexcludeGroups=${localExcludeGroups}"/>
+							<jvmarg value="-DbugdbUsername=${localBugdbUsername}"/>
+							<jvmarg value="-DbugdbPassword=${localBugdbPassword}"/>
+							<classpath>
+								<pathelement path="${build}" />
+								<fileset dir="${lib}">
+									<include name="**/*.jar" />
+								</fileset>
+							</classpath>
+
+							<batchtest fork="yes" todir="${reports}/raw/">
+								<formatter classname="atg.test.selenium.core.utils.CustomXMLJUnitResultFormatter" extension=".xml" />
+								<fileset dir="${build}" includes="${singletest.name}">
+								</fileset>
+							</batchtest>
+						</junit>
+
+						<condition property="breakloop">
+							<and>
+								<isset property="suitefailed" />
+								<equals arg1="${singletest.dep}" arg2="true" />
+							</and>
+						</condition>
+					</then>
+					<else>
+						<echo message="Execution of ${singletest.name} tests is blocked by failure(s) in critical tests." />
+					</else>
+				</if>
+			</sequential>
+		</for>
+	</target>
+
+	<target name="check-application">
+		<if>
+			<equals arg1="${ant.project.name}" arg2="endecaxmgr" />
+			<then>
+				<echo message="Check url skipped for endecaxmgr." />
+			</then>
+			<else>
+				<!--check whether application is accessible over HTTP-->
+				<property name="pubUrl" value="http://${CA1HostName}:${CAAdminPort}/atg/bcc" />
+				<fail message="ATG Publishing by URL ${pubUrl} is inaccessible.">
+					<condition>
+						<not>
+							<http url="${pubUrl}" errorsBeginAt="201" />
+						</not>
+					</condition>
+				</fail>
+			</else>
+		</if>
+	</target>
+
+	<target name="run-tests" description="run your test suite">
+		<script language="javascript">
+			<![CDATA[
+		echotask = project.createTask("echo");
+        function echo(msg) { echotask.setMessage(msg); echotask.execute(); }
+		var test_priority = project.getProperty("priority");
+		if (!test_priority) {
+		  var prop = project.getProperty("testsuiteSrc"); 
+          echo("INFO: priority property is undefined, will use default " + prop);
+          test_priority = prop;
+	    } 
+		project.setProperty("testsuiteSrc", test_priority);
+		]]>
+		</script>
+
+		<if>
+			<isset property="smoke" />
+			<then>
+				<antcallback target="run-test-suite" inheritall="true" return="suitefailed">
+					<param name="name" value="${smoke}" />
+					<param name="ignorelevel" value="true" />
+				</antcallback>
+			</then>
+		</if>
+
+		<if>
+			<isset property="suitefailed" />
+			<then>
+				<echo message="Tests from ${testsuiteSrc} suite will be skipped due to smoke test failure." />
+			</then>
+			<else>
+				<antcallback target="run-test-suite" inheritall="true">
+					<param name="name" value="${testsuiteSrc}" />
+				</antcallback>
+			</else>
+		</if>
+	</target>
+
+	<target name="run-failed-tests" description="run all tests from generated failedtests.txt">
+		<if>
+			<and>
+				<isset property="rerun_failures" />
+				<istrue value="${rerun_failures}" />
+				<available file="reports/failedtests.txt" />
+			</and>
+			<then>
+				<echo message="Backing up first run xml results to firstrun_results directory" />
+				<copy todir="${reports}/firstrun_results">
+					<fileset dir="${reports}/raw/" />
+				</copy>
+				<!-- echo message="Removing the failed testcases from the first run reports" />
+				<for param="file">
+					<path>
+						<fileset dir="${reports}/raw/" includes="*.xml" />
+					</path>
+					<sequential>
+						<echo>Manipulating file: @{file}</echo>
+						<xmltask source="@{file}" dest="@{file}">
+							<remove path="/testsuite/testcase[child::failure]" />
+							<remove path="/testsuite/testcase[child::error]" />
+							<copy path="count(/testsuite/testcase[not(child::failure) and not(child::error)])" property="@{file}_tccount" />
+						</xmltask>
+						<xmltask source="@{file}" dest="@{file}">
+							<replace path="/testsuite/@tests" withText="${@{file}_tccount}" />
+							<replace path="/testsuite/@failures" withText="0" />
+							<replace path="/testsuite/@errors" withText="0" />
+						</xmltask>
+					</sequential>
+				</for-->
+				<echo message="Rerunning failures from ${testsuiteSrc} suite" />
+				<move file="reports/failedtests.txt" tofile="./rerun.txt" />
+				<antcallback target="run-test-suite" inheritall="true">
+					<param name="name" value="rerun.txt" />
+				</antcallback>
+			</then>
+			<else>
+				<echo message="Skipping automatic failure rerun. rerun_failures property is not set to true (or) there are no failures" />
+			</else>
+		</if>
+	</target>
+
+	<target name="test" depends="run-tests,run-failed-tests">
+		<junitreport todir="${reports}">
+			<fileset dir="${reports}/raw/">
+				<include name="TEST-*.xml" />
+			</fileset>
+			<report format="frames" styledir="../common/lib/" todir="${reports}\html\" />
+		</junitreport>
+	</target>
+
+	<target name="webdriver-server-start" description="Start the Chrome/IE Driver">
+		<switch value="${AppBrowser}">
+			<case value="iexplore">
+				<echo message="Starting IE Driver" />
+				<exec spawn="true" executable="${ie.driver.path}">
+					<arg value="-port=${WebDriverServerPort}" />
+				</exec>
+			</case>
+			<case value="chrome">
+				<echo message="Starting Chrome Driver" />
+				<exec spawn="true" executable="${chrome.driver.path}">
+					<arg value="-port=${WebDriverServerPort}" />
+				</exec>
+			</case>
+			<default>
+				<echo message="Skipping WebDriver server startup for browser=${AppBrowser}" />
+			</default>
+		</switch>
+	</target>
+
+	<target name="webdriver-server-stop" description="Stop the Chrome/IE Driver">
+		<if>
+			<or>
+				<equals arg1="${AppBrowser}" arg2="iexplore" />
+				<equals arg1="${AppBrowser}" arg2="chrome" />
+			</or>
+			<then>
+				<echo message="Stopping IE/Chrome Driver" />
+				<post to="http://localhost:${WebDriverServerPort}/shutdown" wantresponse="true" />
+			</then>
+			<else>
+				<echo message="Skipping WebDriver server shutdown for browser=${AppBrowser}" />
+			</else>
+		</if>
+	</target>
+
+	<target name="check-webdriver-server" description="Check if Chrome/IE Driver is running and restart if necessary">
+		<if>
+			<and>
+				<or>
+					<equals arg1="${AppBrowser}" arg2="iexplore" />
+					<equals arg1="${AppBrowser}" arg2="chrome" />
+				</or>
+				<not>
+					<http url="http://localhost:${WebDriverServerPort}/status" errorsBeginAt="201" />
+				</not>
+			</and>
+
+			<then>
+				<echo message="No response from Chrome/IE Driver, it will be restarted!" />
+				<!--antcall target="webdriver-server-stop" inheritAll="true"/-->
+				<antcall target="webdriver-server-start" inheritAll="true" />
+			</then>
+		</if>
+	</target>
+
+	<target name="init" description="initialize the build environment" depends="verify_properties,check-application">
+		<!-- Create the time stamp -->
+		<tstamp />
+		<!-- Clean previous results -->
+		<delete dir="${reports}" quiet="true" />
+		<!-- Create directory structures -->
+		<mkdir dir="${build}" />
+		<mkdir dir="${dist}" />
+		<mkdir dir="${reports}" />
+		<mkdir dir="${reports}/raw/" />
+		<mkdir dir="${reports}/html/" />
+		<mkdir dir="${reports}/screenshots/" />
+		<mkdir dir="${reports}/video/" />
+		<copy file="${video.recorder}" todir="${reports}/video/" overwrite="true" verbose="true" />
+	</target>
+
+	<target name="compress-logs" description="compress log file and delete">
+		<zip basedir="${reports}" includes="${selenium.server.logfile}" compress="true" excludes="*.xml, *.txt" destfile="${reports}/${selenium.server.logfile.zip}" />
+		<delete deleteonexit="true" file="${reports}/${selenium.server.logfile}" />
+	</target>
+
+	<target name="tweak-registry-for-ie">
+
+		<!-- The Registry-Key -->
+		<property name="reg.http.credential.disable.entry" value="HKEY_CURRENT_USER\Software\Microsoft\Internet Explorer\Main\FeatureControl\FEATURE_HTTP_USERNAME_PASSWORD_DISABLE" />
+		<property name="reg.zoom.entry" value="HKEY_CURRENT_USER\Software\Microsoft\Internet Explorer\Zoom" />
+
+		<property name="reg.security.zone1.entry" value="HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings\Zones\1" />
+		<property name="reg.security.zone2.entry" value="HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings\Zones\2" />
+		<property name="reg.security.zone3.entry" value="HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings\Zones\3" />
+		<property name="reg.security.zone4.entry" value="HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings\Zones\4" />
+
+		<property name="reg.popup.blocker.entry" value="HKEY_CURRENT_USER\Software\Microsoft\Internet Explorer\New Windows" />
+
+		<property name="reg.autocomplete.entry" value="HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Explorer\AutoComplete" />
+		<property name="reg.form.autocomplete.entry" value="HKEY_CURRENT_USER\Software\Microsoft\Internet Explorer\IntelliForms" />
+
+		<property name="reg.popup.open.in.entry" value="HKEY_CURRENT_USER\Software\Microsoft\Internet Explorer\TabbedBrowsing" />
+
+
+		<!-- The Name for the Value -->
+		<property name="reg.http.credential.disable.key" value="iexplore.exe" />
+		<property name="reg.zoom.key" value="ZoomFactor" />
+
+		<property name="reg.security.protectedmode.key" value="2500" />
+		<property name="reg.security.level.key" value="CurrentLevel" />
+
+		<property name="reg.popup.blocker.key" value="PopupMgr" />
+
+		<property name="reg.autocomplete.autosuggest.key" value="AutoSuggest" />
+		<property name="reg.autocomplete.do.key" value="Append Completion" />
+		<property name="reg.form.autocomplete.prompt.key" value="AskUser" />
+
+		<property name="reg.popup.open.in.key" value="PopupsUseNewWindow" />
+		<property name="reg.link.open.in.key" value="ShortcutBehavior" />
+
+		<!-- The value to store -->
+		<property name="reg.http.credential.disable.value" value="dword:00000000" />
+		<property name="reg.zoom.value" value="dword:000186a0" />
+		<property name="reg.security.protectedmode.value" value="dword:00000003" />
+		<property name="reg.security.level.value" value="dword:00012000" />
+
+		<property name="reg.popup.blocker.value" value="dword:00000000" />
+
+		<property name="reg.autocomplete.autosuggest.value" value="no" />
+		<property name="reg.autocomplete.do.value" value="no" />
+		<property name="reg.form.autocomplete.prompt.value" value="dword:00000000" />
+		<property name="reg.popup.open.in.value" value="dword:00000001" />
+		<property name="reg.link.open.in.value" value="dword:00000000" />
+
+		<!-- The NewLine -->
+		<property name="br" value="${line.separator}" />
+		<echo>Create a temporary REG-File</echo>
+		<echo file="temp.reg" append="false">Windows Registry Editor Version 5.00${br}</echo>
+
+		<!-- Disable http authentication -->
+		<echo file="temp.reg" append="true">${br}</echo>
+		<echo file="temp.reg" append="true">[${reg.http.credential.disable.entry}]${br}</echo>
+		<echo file="temp.reg" append="true">"${reg.http.credential.disable.key}"=${reg.http.credential.disable.value}${br}</echo>
+		<!-- Set the zoom level. -->
+		<echo file="temp.reg" append="true">${br}</echo>
+		<echo file="temp.reg" append="true">[${reg.zoom.entry}]${br}</echo>
+		<echo file="temp.reg" append="true">"${reg.zoom.key}"=${reg.zoom.value}${br}</echo>
+
+		<!-- Disable protected mode across all zones. -->
+		<echo file="temp.reg" append="true">${br}</echo>
+		<echo file="temp.reg" append="true">[${reg.security.zone1.entry}]${br}</echo>
+		<echo file="temp.reg" append="true">"${reg.security.protectedmode.key}"=${reg.security.protectedmode.value}${br}</echo>
+		<echo file="temp.reg" append="true">"${reg.security.level.key}"=${reg.security.level.value}${br}</echo>
+		<echo file="temp.reg" append="true">${br}</echo>
+		<echo file="temp.reg" append="true">[${reg.security.zone2.entry}]${br}</echo>
+		<echo file="temp.reg" append="true">"${reg.security.protectedmode.key}"=${reg.security.protectedmode.value}${br}</echo>
+		<echo file="temp.reg" append="true">"${reg.security.level.key}"=${reg.security.level.value}${br}</echo>
+		<echo file="temp.reg" append="true">${br}</echo>
+		<echo file="temp.reg" append="true">[${reg.security.zone3.entry}]${br}</echo>
+		<echo file="temp.reg" append="true">"${reg.security.protectedmode.key}"=${reg.security.protectedmode.value}${br}</echo>
+		<echo file="temp.reg" append="true">"${reg.security.level.key}"=${reg.security.level.value}${br}</echo>
+		<echo file="temp.reg" append="true">${br}</echo>
+		<echo file="temp.reg" append="true">[${reg.security.zone4.entry}]${br}</echo>
+		<echo file="temp.reg" append="true">"${reg.security.protectedmode.key}"=${reg.security.protectedmode.value}${br}</echo>
+		<echo file="temp.reg" append="true">"${reg.security.level.key}"=${reg.security.level.value}${br}</echo>
+		<!-- Disable popup blocker. -->
+		<echo file="temp.reg" append="true">${br}</echo>
+		<echo file="temp.reg" append="true">[${reg.popup.blocker.entry}]${br}</echo>
+		<echo file="temp.reg" append="true">"${reg.popup.blocker.key}"=${reg.popup.blocker.value}${br}</echo>
+		<!-- Disable AutoComplete. -->
+		<echo file="temp.reg" append="true">${br}</echo>
+		<echo file="temp.reg" append="true">[${reg.autocomplete.entry}]${br}</echo>
+		<echo file="temp.reg" append="true">"${reg.autocomplete.autosuggest.key}"=${reg.autocomplete.autosuggest.value}${br}</echo>
+		<echo file="temp.reg" append="true">"${reg.autocomplete.do.key}"=${reg.autocomplete.do.value}${br}</echo>
+
+		<echo file="temp.reg" append="true">${br}</echo>
+		<echo file="temp.reg" append="true">[${reg.form.autocomplete.entry}]${br}</echo>
+		<echo file="temp.reg" append="true">"${reg.form.autocomplete.prompt.key}"=${reg.form.autocomplete.prompt.value}${br}</echo>
+
+		<!-- open popups in new window. -->
+		<echo file="temp.reg" append="true">${br}</echo>
+		<echo file="temp.reg" append="true">[${reg.popup.open.in.entry}]${br}</echo>
+		<echo file="temp.reg" append="true">"${reg.popup.open.in.key}"=${reg.popup.open.in.value}${br}</echo>
+		<echo file="temp.reg" append="true">"${reg.link.open.in.key}"=${reg.link.open.in.value}${br}</echo>
+
+	</target>
+
+	<target name="all" depends="init,compile,tweak-registry-for-ie,webdriver-server-start,test,webdriver-server-stop,compress-logs,dist" />
+	<target name="allbutwebdriver" depends="init,compile,test,compress-logs,dist" />
+
+</project>

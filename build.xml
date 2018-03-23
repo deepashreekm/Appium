@@ -1,0 +1,131 @@
+<!-- @author rvangala -->
+<project name="Common" basedir=".">
+
+	<description>
+	        Selenium Common Framework  Library
+	    </description>
+
+	<!-- set global properties -->
+	<property name="project_name" value="common" />
+	<property name="src" location="src/java" />
+	<property name="build" location="../bin" />
+	<property name="dist" location="dist" />
+	<property name="lib" location="lib" />
+	<property name="log" value="log" />
+	<property name="reports" location="../reports" />
+	<property name="docdir" location="/selenium/docs" />
+
+	<!-- distributable files -->
+	<property name="jar_name" value="${project_name}.jar" />
+
+	<!-- top level targets -->
+	<target name="compile" depends="init" description="compile the source code ">
+		<copy todir="${build}">
+			<fileset dir="${src}" />
+		</copy>
+		<javac destdir="${build}" debug="on" includeAntRuntime="false" encoding="UTF-8">
+			<src path="${src}" />
+			<classpath>
+				<fileset dir="${lib}">
+					<include name="**/*.jar" />
+				</fileset>
+			</classpath>
+		</javac>
+	</target>
+
+	<target name="javadoc" description="generate java docs for selenium common library">
+          <property name="doc_destdir" location="docdir"/>
+		<javadoc 
+		packagenames="endeca.test.selenium.*, junit.framework.*, org.*, atg.test.selenium.*, atg.test.rest.*" 
+		sourcepath="${src}" 
+		defaultexcludes="yes" 
+		destdir="${doc_destdir}" 
+		author="false" 
+		version="true" 
+		use="true" 
+		maxmemory="1g"
+		windowtitle="Selenium Framework Common Library">
+		
+			<classpath>
+				<fileset dir="${lib}">
+					<include name="**/*.jar" />
+				</fileset>
+			</classpath>
+			<doctitle>
+				<![CDATA[<h1>Test</h1>]]></doctitle>
+			<bottom>
+				<![CDATA[<i>Copyright &#169; 2014 Oracle Commerce. All Rights Reserved.</i>]]></bottom>
+			<tag name="todo" scope="all" description="To do:" />
+			<link href="http://download.oracle.com/javase/6/docs/api/"/>
+		</javadoc>
+	</target>
+
+	<target name="dist" description="generate the distributable files ">
+		<!-- Put everything in ${build} into the ${project_name}.jar file -->
+		<jar jarfile="${dist}/${jar_name}" basedir="${build}" />
+	</target>
+
+	<target name="clean" description="clean up">
+		<!-- Delete the ${build} and ${dist} directory trees -->
+		<delete dir="${build}" />
+		<delete dir="${dist}" />
+		<delete dir="${reports}" />
+	</target>
+	
+	<target name="minimizeWindows" description="minimize all opened windows">
+	<property name="WindowsMinimizer"
+            location="${lib}/WindowsMinimizer.exe"/>
+		<exec executable="${WindowsMinimizer}" >
+		</exec>
+	</target>
+
+	<!-- supporting targets -->
+
+	<target name="init" description="initialize the build environment">
+		<!-- Create the time stamp -->
+		<tstamp />
+		<!-- Create directory structures -->
+		<mkdir dir="${build}" />
+		<mkdir dir="${dist}" />
+	</target>
+
+	<target name="set-ie-http-feature">
+
+        <!-- The Registry-Key -->
+        <property name="reg.key" value="HKEY_CURRENT_USER\Software\Microsoft\Internet Explorer\Main\FeatureControl\FEATURE_HTTP_USERNAME_PASSWORD_DISABLE" />
+
+        <!-- The Name for the Value -->
+        <property name="reg.name" value="iexplore.exe" />
+
+        <!-- The value to store -->
+        <property name="reg.value" value="dword:00000000" />
+
+        <!-- The NewLine -->
+        <property name="br" value="${line.separator}" />
+
+        <echo>Create a temporary REG-File</echo>
+        <echo file="temp.reg" append="false">Windows Registry Editor Version 5.00${br}</echo>
+        <echo file="temp.reg" append="true" >${br}</echo>
+        <echo file="temp.reg" append="true" >[${reg.key}]${br}</echo>
+        <echo file="temp.reg" append="true" >"${reg.name}"=${reg.value}${br}</echo>
+
+        <echo>Import the REG-File into the registry</echo>
+        <exec executable="regedit.exe"><arg line="/s temp.reg"/></exec>
+
+        <echo>Delete the temporary REG-File</echo>
+        <delete file="temp.reg" />
+
+    </target>
+	<target name="all" depends="clean,minimizeWindows,compile,set-ie-http-feature">
+	</target>
+	
+        <target name="road-javadoc">
+          <property name="tempdoc.dir" location="${docdir}.new"/>
+          <delete dir="${tempdoc.dir}"/>
+          <antcall target="javadoc">
+            <param name="doc_destdir" value="${tempdoc.dir}"/>
+          </antcall>
+          <delete dir="${docdir}"/>
+          <move file="${tempdoc.dir}" tofile="${docdir}"/>
+        </target>
+</project>
