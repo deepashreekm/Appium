@@ -1,0 +1,11 @@
+<html>
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=ISO-8859-1">
+    <title>Video for test</title>
+  </head>
+  <body>  
+    <applet name="videoApplet" code="org/one/stone/soup/screen/player/application/PlayerApplet.class" height="700" width="1000" ARCHIVE="screen-recorder.jar">
+      <param name="VideoToPlay" value="%1s">
+    </applet>
+  </body>
+</html>
